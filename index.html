@@ -124,18 +124,21 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 <dialog id="sheet" aria-label="設定與對話紀錄">
  <div class="sh">
   <h2>設定與紀錄</h2>
-  <label class="row"><span>自動輪流（說完自動換對方）</span><input type="checkbox" id="optAuto"></label>
+  <label class="row"><span>收音方式</span><select id="optMode"><option value="ai">自動偵測（AI）</option><option value="turn">手機辨識（輪流）</option></select></label>
+  <label class="row"><span>使用情境（AI 用詞）</span><select id="optScene"></select></label>
+  <label class="row"><span>自動輪流（手機辨識時）</span><input type="checkbox" id="optAuto"></label>
   <label class="row"><span>停頓多久算說完</span><select id="optGap"><option value="1">1 秒</option><option value="1.5">1.5 秒</option><option value="2">2 秒</option><option value="3">3 秒</option></select></label>
-  <label class="row"><span>邊說邊翻譯（對方即時看到）</span><input type="checkbox" id="optLive"></label>
+  <label class="row"><span>邊說邊翻譯（手機辨識時）</span><input type="checkbox" id="optLive"></label>
   <label class="row"><span>放慢朗讀速度</span><input type="checkbox" id="optSlow"></label>
   <div class="btns"><button class="btn" id="copy" type="button">複製對話紀錄</button><button class="btn warn" id="clear" type="button">清除對話</button></div>
   <textarea id="copyBox" readonly hidden aria-label="對話紀錄"></textarea>
   <h3>怎麼用</h3>
   <ol>
    <li>你的畫面在下方（電腦上在左邊），對方的在上方並轉向對方；兩邊各選自己的語言。</li>
-   <li>按任一邊的麥克風開始。開著「自動輪流」時，說完停一下就會翻譯、念出來，接著自動聽另一邊。</li>
-   <li>同一個人想接著說：按他那一邊的麥克風搶回來。要暫停：按紅色的麥克風。</li>
-   <li>關掉「自動輪流」時：按一下開始、說完再按一下。</li>
+   <li>自動偵測（AI）：按任一邊的麥克風開始，之後不用再按。誰說話、說哪種語言都會自動判斷，翻成另一邊並念出來；說完停一下約 2～3 秒出現。按紅色麥克風暫停。</li>
+   <li>手機在念譯文時（狀態列出現 🔊）不收音，請等它念完再說。</li>
+   <li>AI 免費版的內容，Google 可能保留來改進產品：請不要說個案的敏感資料。</li>
+   <li>手機辨識（輪流）：不用 AI。說完停一下會換聽對方；同一個人要接著說，按他那邊的麥克風搶回來。</li>
    <li>對話只留在這個畫面，關掉就清空；需要記錄請先複製。</li>
   </ol>
   <p class="envl" id="envInfo"></p>
@@ -172,11 +175,20 @@ const LANGS = [
 ];
 const LANG = {};
 for (const [key, name, bcp, gt, hi, hint, ph, listen, tr, fail] of LANGS) LANG[key] = {key, name, bcp, gt, hi, hint, ph, listen, tr, fail};
+const EN = {'zh-TW': 'Traditional Chinese (Taiwan Mandarin; write it in Traditional characters with Taiwan wording)', en: 'English', ja: 'Japanese', ko: 'Korean', vi: 'Vietnamese', id: 'Indonesian', th: 'Thai', tl: 'Filipino (Tagalog)', ms: 'Malay', 'zh-CN': 'Simplified Chinese (Mainland Mandarin; write it in Simplified characters)', es: 'Spanish', fr: 'French', de: 'German'};
+for (const k in LANG) LANG[k].en = EN[k];
+const SCENES = {
+  general: ['一般對話', 'An everyday conversation.'],
+  at: ['輔具服務', 'A home visit or consultation by an assistive-technology and rehabilitation professional in Taiwan, talking with a client, a family member or a foreign live-in caregiver about mobility, transfers, bathing, toileting, wheelchairs, walkers, commodes, shower chairs, patient lifts, pressure-relief mattresses, stair climbers, grab bars, home modification, long-term care services and government subsidies. Use plain words a caregiver will understand.'],
+  travel: ['旅遊', 'Travel: restaurants, shopping, hotels, transport and asking for directions.']
+};
 
-const P = {A: 'zh-TW', B: 'en', auto: true, gap: 1.5, live: true, read: true, slow: false, rot: null};
+const P = {A: 'zh-TW', B: 'en', mode: 'ai', scene: 'general', auto: true, gap: 1.5, live: true, read: true, slow: false, rot: null};
 try { Object.assign(P, JSON.parse(localStorage.getItem('xlate-gas') || '{}')); } catch (e) {}
 if (!LANG[P.A]) P.A = 'zh-TW';
 if (!LANG[P.B]) P.B = 'en';
+if (P.mode !== 'ai' && P.mode !== 'turn') P.mode = 'ai';
+if (!SCENES[P.scene]) P.scene = 'general';
 if (![1, 1.5, 2, 3].includes(+P.gap)) P.gap = 1.5;
 P.gap = +P.gap;
 if (P.rot === null) P.rot = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
@@ -184,15 +196,23 @@ const save = () => { try { localStorage.setItem('xlate-gas', JSON.stringify(P));
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const isAndroid = /Android/i.test(navigator.userAgent);
-// translation runs in the owner's Apps Script (LanguageApp); the key comes once from the link's #k=… and stays in this browser
+// typed text is translated by the owner's Apps Script (LanguageApp); speech in auto-detect mode goes to Gemini.
+// Both keys come once from the link (#k=…&g=…) and stay in this browser; neither is in the repository.
 const API = 'https://script.google.com/macros/s/AKfycbzqx1xc83tlDvt5R-dC83txGMPUjTZU4j2nRaXPxLq2G8fW7zxhSZxJRwHwuhlaIOfd/exec';
-let KEY = '';
+const GEM = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
+let KEY = '', GKEY = '';
 try {
-  const m = location.hash.match(/k=([A-Za-z0-9_-]+)/);
-  if (m) { KEY = m[1]; localStorage.setItem('xlate-key', KEY); history.replaceState(null, '', location.pathname + location.search); }
-  else KEY = localStorage.getItem('xlate-key') || '';
+  const h = location.hash, mk = h.match(/[#&]k=([A-Za-z0-9_-]+)/), mg = h.match(/[#&]g=([A-Za-z0-9._-]+)/);
+  if (mk) localStorage.setItem('xlate-key', mk[1]);
+  if (mg) localStorage.setItem('xlate-gkey', mg[1]);
+  if (mk || mg) history.replaceState(null, '', location.pathname + location.search);
+  KEY = localStorage.getItem('xlate-key') || '';
+  GKEY = localStorage.getItem('xlate-gkey') || '';
 } catch (e) {}
-const hasAPI = !!KEY;
+const hasAPI = !!KEY, hasAI = !!GKEY;
+const canRec = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && (window.AudioContext || window.webkitAudioContext));
+const ai = () => P.mode === 'ai' && hasAI && canRec;
 const hasVoice = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 
 let turns = [], seq = 0, speakingId = null, unlocked = false, clearArm = false, toastT, wake = null;
@@ -200,6 +220,8 @@ let cur = null;                 // the turn being heard: {side, turn, base}
 let rec = null, recTok = 0, want = false, sessRes = false, sessAt = 0, quick = [], autoStart = false;
 let endT = null, running = false, flow = 0;
 const noStt = {};
+let aiOn = false, aiHot = false, aiCtx = null, aiSrc = null, aiProc = null, aiStream = null, aiRate = 16000, vad = null;
+let pending = 0, ordSeq = 0, ttsQ = [], ttsBusy = false, muteUntil = 0;
 const other = s => (s === 'A' ? 'B' : 'A');
 const spaced = lk => !/^(zh|ja|th)/.test(lk);
 
@@ -220,6 +242,11 @@ function toast(msg) {
 }
 
 function envNote() {
+  if (P.mode === 'ai') {
+    if (!hasAI) return 'AI 自動偵測需要金鑰：請用我給你的完整連結（後面有 #k=…&g=…）開一次。現在先用手機辨識（輪流）。';
+    if (!canRec) return '這個瀏覽器不能錄音：Android 請用 Chrome、iPhone 請用 Safari 開啟。';
+    return '按任一邊的麥克風開始，之後不用再按：誰說話、說哪種語言都會自動判斷，翻成另一邊並念出來。按紅色麥克風暫停。AI 免費版請不要說個案敏感資料。';
+  }
   if (!hasAPI) return '這個網址少了金鑰：請用我給你的完整連結（後面有 #k=…）開一次，之後就不用了。';
   if (!SR) return '這個瀏覽器無法直接收音：Android 請用 Chrome、iPhone 請用 Safari 開啟；也可以點輸入框，用鍵盤麥克風。';
   return P.auto ? '按任一邊的麥克風開始。說完停一下就會翻譯、念出來，接著自動換對方說；按紅色麥克風暫停。'
@@ -245,19 +272,19 @@ function turnHtml(t, side) {
 }
 
 function renderSide(side) {
-  const L = LANG[P[side]], log = $('log' + side), mine = !!(cur && cur.side === side);
+  const L = LANG[P[side]], log = $('log' + side), isAI = ai(), mine = isAI ? aiOn : !!(cur && cur.side === side);
   const sec = $('side' + side);
   sec.lang = L.key;
-  sec.classList.toggle('hot', mine);
+  sec.classList.toggle('hot', isAI ? aiHot : mine);
   const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const html = turns.map(t => turnHtml(t, side)).join('');
-  log.innerHTML = html || `<div class="empty"><p class="hi">${esc(L.hi)}</p><p class="hint">${esc(SR && !noStt[L.key] ? L.hint : L.ph.replace('…', ''))}</p>${side === 'A' ? `<p class="env">${esc(envNote())}</p>` : ''}</div>`;
+  log.innerHTML = html || `<div class="empty"><p class="hi">${esc(L.hi)}</p><p class="hint">${esc(isAI || (SR && !noStt[L.key]) ? L.hint : L.ph.replace('…', ''))}</p>${side === 'A' ? `<p class="env">${esc(envNote())}</p>` : ''}</div>`;
   if (stick) log.scrollTop = log.scrollHeight;
-  const st = $('st' + side), busy = turns.some(t => t.side !== side && t.busy);
-  st.textContent = mine ? L.listen + '…' : busy ? L.tr + '…' : '';
-  st.classList.toggle('rec', mine);
+  const st = $('st' + side), busy = isAI ? pending > 0 : turns.some(t => t.side !== side && t.busy), say = isAI && aiOn && !!speakingId;
+  st.textContent = say ? '🔊…' : busy ? L.tr + '…' : mine ? L.listen + '…' : '';
+  st.classList.toggle('rec', mine && !busy && !say);
   const mic = $('mic' + side);
-  mic.hidden = !SR || !!noStt[L.key];
+  mic.hidden = isAI ? false : !SR || !!noStt[L.key];
   mic.classList.toggle('on', mine);
   mic.innerHTML = mine ? IC.stop : IC.mic;
   mic.setAttribute('aria-label', mine ? '暫停收音' : side === 'A' ? '我要說話' : '對方說話');
@@ -271,17 +298,17 @@ function render() {
   rb.hidden = !hasVoice;
   rb.setAttribute('aria-pressed', String(P.read));
   rb.innerHTML = P.read ? IC.spk : IC.mute;
-  const ab = $('auto');
-  ab.hidden = !SR;
-  ab.setAttribute('aria-pressed', String(P.auto));
-  ab.classList.toggle('run', running);
-  $('autoTx').textContent = running ? '自動輪流中' : '自動輪流';
+  const ab = $('auto'), isAI = ai();
+  ab.hidden = !(isAI || SR);
+  ab.setAttribute('aria-pressed', String(isAI ? aiOn : P.auto));
+  ab.classList.toggle('run', isAI ? aiOn : running);
+  $('autoTx').textContent = isAI ? (pending ? '辨識中…' : aiOn ? '自動偵測中' : '自動偵測') : running ? '自動輪流中' : '自動輪流';
   $('flip').setAttribute('aria-pressed', String(!!P.rot));
   $('app').classList.toggle('rot', !!P.rot);
 }
 
-function addTurn(side, src) {
-  const t = {id: ++seq, side, from: P[side], to: P[other(side)], src, partial: '', tr: '', trFor: null, busy: false, err: null, done: false, ts: new Date(), job: null};
+function addTurn(side, src, ord) {
+  const t = {id: ++seq, ord: ord || ++ordSeq, side, from: P[side], to: P[other(side)], src, partial: '', tr: '', trFor: null, busy: false, err: null, done: false, ts: new Date(), job: null};
   turns.push(t);
   if (turns.length > 60) turns = turns.slice(-60);
   return t;
@@ -362,13 +389,26 @@ function devSpeak(text, bcp, rate) {
 }
 async function speakTurn(t) {
   if (!t || !t.tr || !hasVoice) return;
-  stopSpeak();
+  stopSpeak(true);
   speakingId = t.id;
   render();
   try { await devSpeak(t.tr, LANG[t.to].bcp, P.slow ? 0.85 : 1); }
-  finally { if (speakingId === t.id) { speakingId = null; render(); } }
+  finally { muteUntil = Date.now() + 600; if (speakingId === t.id) { speakingId = null; render(); } }
 }
-function stopSpeak() {
+async function pumpSpeak(force) {
+  if (ttsBusy || !ttsQ.length) return;
+  if (!force && vad && (vad.speaking || vad.voiced)) return;   // someone is talking: read it out when they pause
+  const t = ttsQ.shift();
+  ttsBusy = true;
+  try { await speakTurn(t); } finally { ttsBusy = false; pumpSpeak(); }
+}
+function sayNow(t) {                                           // a tap on the speaker: this one, now
+  if (!ai()) { speakTurn(t); return; }
+  ttsQ = [t].concat(ttsQ.filter(x => x !== t));
+  if (ttsBusy) { try { speechSynthesis.cancel(); } catch (e) {} } else pumpSpeak(true);
+}
+function stopSpeak(keepQueue) {
+  if (!keepQueue) ttsQ = [];
   if (hasVoice) { try { speechSynthesis.cancel(); } catch (e) {} }
   if (speakingId) { speakingId = null; render(); }
 }
@@ -400,7 +440,9 @@ async function finishTurn(t, next, silent) {
   render();
   await translate(t);
   if (f !== flow) return;
-  if (!silent && !t.err && P.read && t === lastDone()) await speakTurn(t);
+  if (!silent && !t.err && P.read && t === lastDone()) {
+    if (ai()) { ttsQ.push(t); pumpSpeak(); } else await speakTurn(t);
+  }
   if (f !== flow) return;
   if (next && running) setTimeout(() => { if (f === flow && running && !cur) startListen(next, true); }, 250);
 }
@@ -515,10 +557,233 @@ function haltListening(msg, silent) {
   render();
 }
 
+// ---------- AI auto-detect: the phone records each utterance, Gemini decides who spoke, transcribes and translates ----------
+function aiBegin() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  try { aiCtx = new AC(); } catch (e) { aiCtx = null; }
+  if (!aiCtx) { toast('這個瀏覽器不能錄音'); return; }
+  try { aiCtx.resume(); } catch (e) {}
+  stopSpeak();
+  aiOn = true;
+  render();
+  navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1}})
+    .then(stream => {
+      if (!aiOn || !aiCtx) { stream.getTracks().forEach(t => t.stop()); return; }
+      aiStream = stream;
+      aiRate = aiCtx.sampleRate;
+      const tr = stream.getAudioTracks()[0];
+      if (tr) tr.onended = () => { if (aiOn && aiStream === stream) { aiStop(false); toast('麥克風被中斷了，請再按一次麥克風'); } };
+      if (aiCtx.state === 'suspended') aiCtx.resume().catch(() => {});
+      aiSrc = aiCtx.createMediaStreamSource(stream);
+      aiProc = aiCtx.createScriptProcessor(2048, 1, 1);
+      aiProc.onaudioprocess = e => onFrame(e.inputBuffer.getChannelData(0));
+      aiSrc.connect(aiProc);
+      aiProc.connect(aiCtx.destination);
+      vad = {speaking: false, buf: [], pre: [], hist: [], silence: 0, voiced: 0, loud: 0, noise: 0.004};
+      render();
+      toast('收音中：誰說都可以，說完停一下就會翻譯');
+    })
+    .catch(e => {
+      aiStop(false);
+      toast(e && e.name === 'NotAllowedError' ? '沒有麥克風權限：請點網址列旁的圖示，允許使用麥克風' : '打不開麥克風，請再按一次');
+    });
+}
+function aiStop(flush) {
+  if (flush && vad && vad.speaking) finishUtterance(false);
+  aiOn = false;
+  vad = null;
+  setHot(false);
+  try { if (aiProc) { aiProc.onaudioprocess = null; aiProc.disconnect(); } if (aiSrc) aiSrc.disconnect(); } catch (e) {}
+  try { if (aiStream) aiStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  try { if (aiCtx) aiCtx.close(); } catch (e) {}
+  aiProc = aiSrc = aiStream = aiCtx = null;
+  render();
+  pumpSpeak();
+}
+function setHot(on) {
+  if (aiHot === on) return;
+  aiHot = on;
+  for (const s of ['A', 'B']) $('side' + s).classList.toggle('hot', on);
+}
+function onFrame(x) {
+  const v = vad;
+  if (!aiOn || !v) return;
+  const fms = x.length / aiRate * 1000;
+  let s = 0;
+  for (let i = 0; i < x.length; i++) s += x[i] * x[i];
+  const rms = Math.sqrt(s / x.length);
+  v.hist.push(rms);
+  if (v.hist.length > Math.ceil(3000 / fms)) v.hist.shift();
+  if (speakingId || ttsBusy || Date.now() < muteUntil) {      // our own voice is playing: don't send it
+    if (v.speaking) { v.speaking = false; v.buf = []; setHot(false); }
+    v.pre = [];
+    v.voiced = 0;
+    return;
+  }
+  const thr = Math.max(0.01, v.noise * 3);
+  const f = new Float32Array(x);
+  if (!v.speaking) {
+    v.pre.push(f);
+    if (v.pre.length > Math.ceil(400 / fms)) v.pre.shift();
+    if (rms > thr) {
+      if (++v.voiced >= 2) { v.speaking = true; v.buf = v.pre; v.pre = []; v.silence = 0; v.loud = v.voiced; setHot(true); }
+    } else {
+      v.voiced = 0;
+      v.noise = Math.max(0.0015, v.noise * 0.95 + rms * 0.05);
+      if (ttsQ.length && !ttsBusy) pumpSpeak();
+    }
+  } else {
+    v.buf.push(f);
+    if (rms > thr * 0.7) { v.silence = 0; v.loud++; } else v.silence++;
+    if (v.silence * fms >= P.gap * 1000) finishUtterance(true);
+    else if (v.buf.length * fms >= 15000) {                  // 15 s without a pause: send it, and treat the steady level as noise
+      v.noise = Math.min(0.05, Math.max(v.noise, Math.min.apply(null, v.hist)));
+      finishUtterance(false);
+    }
+  }
+}
+function finishUtterance(trim) {
+  const v = vad;
+  if (!v || !v.speaking) return;
+  const frames = v.buf, loud = v.loud, fms = (frames[0] ? frames[0].length : 2048) / aiRate * 1000;
+  v.speaking = false;
+  v.buf = [];
+  v.silence = 0;
+  v.voiced = 0;
+  v.loud = 0;
+  setHot(false);
+  if (loud * fms >= 300) {                                     // shorter: a click or a cough
+    const cut = trim ? Math.max(0, Math.floor((P.gap * 1000 - 300) / fms)) : 0, keep = frames.slice(0, Math.max(1, frames.length - cut)), rate = aiRate;
+    const ord = ++ordSeq;
+    pending++;
+    render();
+    setTimeout(() => {
+      let audio = '';
+      try { audio = wav16(keep, rate); } catch (e) { pending--; render(); return; }
+      sendUtterance(audio, ord);
+    }, 0);
+  }
+  pumpSpeak();
+}
+function wav16(frames, rate) {
+  let n = 0;
+  for (const f of frames) n += f.length;
+  let pcm = new Float32Array(n), o = 0;
+  for (const f of frames) { pcm.set(f, o); o += f.length; }
+  const r = rate / 16000;
+  if (r > 1.01) {
+    const out = new Float32Array(Math.floor(pcm.length / r));
+    for (let i = 0; i < out.length; i++) {
+      const a = Math.floor(i * r), b = Math.min(pcm.length, Math.max(a + 1, Math.floor((i + 1) * r)));
+      let s = 0;
+      for (let j = a; j < b; j++) s += pcm[j];
+      out[i] = s / (b - a);
+    }
+    pcm = out;
+    rate = 16000;
+  }
+  const b = new ArrayBuffer(44 + pcm.length * 2), d = new DataView(b);
+  const w = (p, s) => { for (let i = 0; i < s.length; i++) d.setUint8(p + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); d.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true); d.setUint32(24, rate, true);
+  d.setUint32(28, rate * 2, true); d.setUint16(32, 2, true); d.setUint16(34, 16, true); w(36, 'data'); d.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) { const x = Math.max(-1, Math.min(1, pcm[i])); d.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
+  const u = new Uint8Array(b);
+  let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function sendUtterance(audio, ord) {
+  const a = P.A, b = P.B;
+  geminiListen(audio, a, b).then(o => {
+    const who = o && (o.who === 'A' || o.who === 'B') ? o.who : null, text = o ? String(o.text || '').trim() : '';
+    if (!who || !text) return;
+    const t = addTurn(who, text, ord);
+    t.from = who === 'A' ? a : b;
+    t.to = who === 'A' ? b : a;
+    t.tr = String(o.tr || '').trim();
+    t.trFor = text;
+    t.done = true;
+    if (!t.tr) t.err = 'fail';
+    turns.sort((x, y) => x.ord - y.ord);
+    render();
+    if (P.read && t.tr) { ttsQ.push(t); pumpSpeak(); }
+  }).catch(e => {
+    const m = String((e && e.message) || e);
+    toast(/^429|RESOURCE|quota/i.test(m) ? 'AI 使用量暫時到上限，請稍後再說，或在「⋯」改用手機辨識'
+      : /^(400|401|403)/.test(m) ? 'AI 金鑰有問題：請用完整連結重新開一次'
+      : 'AI 這句沒有回應，請再說一次');
+  }).finally(() => { pending--; render(); });
+}
+async function geminiListen(audio, a, b) {
+  const body = JSON.stringify({contents: [{role: 'user', parts: [{text: listenPrompt(a, b)}, {inlineData: {mimeType: 'audio/wav', data: audio}}]}], generationConfig: {responseMimeType: 'application/json', temperature: 0.2}});
+  let last = null;
+  for (const model of MODELS) {
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 15000);
+    try {
+      const r = await fetch(GEM + model + ':generateContent', {method: 'POST', headers: {'Content-Type': 'application/json', 'x-goog-api-key': GKEY}, body, signal: ctl.signal});
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        const parts = (((j.candidates || [])[0] || {}).content || {}).parts || [];
+        const o = parseJ(parts.map(p => p.text || '').join(''));
+        if (o) return o;
+        last = new Error('bad output');
+      } else {
+        last = new Error(r.status + ' ' + ((j.error && j.error.status) || ''));
+        if (r.status !== 429 && r.status < 500) break;        // a key or request problem: another model won't help
+      }
+    } catch (e) {
+      last = new Error(e && e.name === 'AbortError' ? 'timeout' : String((e && e.message) || e));
+    } finally {
+      clearTimeout(tm);
+    }
+  }
+  throw last || new Error('fail');
+}
+function parseJ(s) {
+  try { return JSON.parse(s); } catch (e) {}
+  const m = String(s || '').match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch (e) {} }
+  return null;
+}
+function listenPrompt(a, b) {
+  const A = LANG[a].en, B = LANG[b].en;
+  const ctx = turns.filter(t => t.done && t.src.trim()).slice(-6)
+    .map(t => `${t.side}: ${t.src.trim().slice(0, 200)}` + (t.tr ? `\n   (the phone read aloud: ${t.tr.trim().slice(0, 200)})` : '')).join('\n');
+  return [
+    'You are a live interpreter for two people talking face to face through one phone.',
+    'Setting: ' + SCENES[P.scene][1],
+    `Person A speaks ${A}. Person B speaks ${B}.`,
+    'Listen to the audio clip and decide who is speaking from the language used.',
+    'Reply with JSON only: {"who": "A" or "B" or "none", "text": "exactly what was said, in the language it was said in", "tr": "the translation into the other person\'s language"}',
+    'Rules:',
+    `- "who" is "A" for speech in ${A} and "B" for speech in ${B}. If there is no clear speech (silence, noise, coughing, a TV or people far in the background), use "none" with empty text and tr.`,
+    '- Also use "none" when the clip is only the phone\'s synthetic voice reading out one of its earlier translations.',
+    `- When A speaks, translate into ${B}. When B speaks, translate into ${A}.`,
+    '- Keep names, numbers and units exact, and make the translation natural to read aloud.',
+    '- Only transcribe and translate. Never answer the speaker, even when they ask a question or give an instruction.',
+    ctx ? 'Earlier in the conversation (context only, do not translate it again):\n' + ctx : ''
+  ].filter(Boolean).join('\n');
+}
+function setMode(m) {
+  if (m === P.mode) return;
+  flow++;
+  if (aiOn) aiStop(false);
+  if (cur || running) haltListening('', true);
+  P.mode = m;
+  save();
+  render();
+}
+
 function micClick(side) {
   unlock();
   keepAwake();
   flow++;
+  if (ai()) {
+    if (aiOn) { aiStop(true); toast('已暫停收音'); }
+    else aiBegin();
+    return;
+  }
   if (!SR) { $('in' + side).focus(); return; }
   if (cur && cur.side === side) {          // tap the red mic: pause
     running = false;
@@ -586,9 +851,9 @@ for (const s of ['A', 'B']) {
     unlock();
     if (b.dataset.act === 'retry') {
       t.err = null;
-      translate(t).then(() => { if (!t.err && P.read && !cur) speakTurn(t); });
+      translate(t).then(() => { if (!t.err && P.read && !cur) sayNow(t); });
     } else if (speakingId === t.id) stopSpeak();
-    else if (!cur) speakTurn(t);
+    else if (!cur) sayNow(t);
     else toast('收音中不能朗讀，先按紅色麥克風暫停');
   });
 }
@@ -601,6 +866,7 @@ function setAuto(on) {
   render();
 }
 $('auto').addEventListener('click', () => {
+  if (ai()) { micClick('A'); return; }
   setAuto(!P.auto);
   toast(P.auto ? '自動輪流：說完停一下就翻譯，再換對方說' : '已關閉自動輪流：按一下開始、說完再按一下');
 });
@@ -613,11 +879,13 @@ $('read').addEventListener('click', () => {
 });
 $('flip').addEventListener('click', () => { P.rot = !P.rot; save(); render(); });
 $('more').addEventListener('click', () => {
+  $('optMode').value = P.mode;
+  $('optScene').value = P.scene;
   $('optAuto').checked = P.auto;
   $('optGap').value = String(P.gap);
   $('optLive').checked = P.live;
   $('optSlow').checked = P.slow;
-  $('envInfo').textContent = `目前環境　收音：${SR ? '瀏覽器語音辨識' : '不支援（請改用 Chrome／Safari）'}｜翻譯：${hasAPI ? 'Google 翻譯（你的 Apps Script）' : '缺少金鑰'}｜朗讀：${hasVoice ? '手機內建語音' : '無'}`;
+  $('envInfo').textContent = `目前環境　收音：${ai() ? 'AI 自動偵測（Gemini 免費版）' : SR ? '手機語音辨識' : '不支援（請改用 Chrome／Safari）'}｜AI 金鑰：${hasAI ? '有' : '沒有'}｜打字翻譯：${hasAPI ? 'Google 翻譯（你的 Apps Script）' : '缺少金鑰'}｜朗讀：${hasVoice ? '手機內建語音' : '無'}`;
   $('copyBox').hidden = true;
   clearArm = false;
   $('clear').textContent = '清除對話';
@@ -626,6 +894,12 @@ $('more').addEventListener('click', () => {
 });
 $('close').addEventListener('click', () => { const d = $('sheet'); try { d.close(); } catch (e) { d.removeAttribute('open'); } });
 $('optAuto').addEventListener('change', e => setAuto(e.target.checked));
+$('optScene').innerHTML = Object.entries(SCENES).map(([k, v]) => `<option value="${k}">${esc(v[0])}</option>`).join('');
+$('optScene').addEventListener('change', e => { P.scene = SCENES[e.target.value] ? e.target.value : 'general'; save(); });
+$('optMode').addEventListener('change', e => {
+  if (e.target.value === 'ai' && !(hasAI && canRec)) { e.target.value = P.mode; toast(hasAI ? '這個瀏覽器不能錄音' : 'AI 需要金鑰：請用完整連結開一次'); }
+  setMode(e.target.value);
+});
 $('optGap').addEventListener('change', e => { P.gap = +e.target.value || 1.5; save(); });
 $('optLive').addEventListener('change', e => { P.live = e.target.checked; save(); });
 $('optSlow').addEventListener('change', e => { P.slow = e.target.checked; save(); });
@@ -656,6 +930,7 @@ $('clear').addEventListener('click', () => {
 document.addEventListener('pointerdown', unlock, true);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
+    if (aiOn) aiStop(false);
     if (cur || running) { flow++; haltListening('', true); }
     stopSpeak();
   } else if (wake === null && running) keepAwake();
