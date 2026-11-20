@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#17171b">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>雙向即時翻譯</title>
+<style>
+/* VOICE: calm, practical, large print; used across a table with clients, families and caregivers
+   IDEA: a two-sided table tent: the phone lies flat and each half faces one person
+   PICTURE: the halves themselves: theirs a solid ultramarine field, mine paper white, a dark fold between; the half that is listening gets a vermilion rim
+   COLOUR and TYPE: paper and ink, ultramarine field, vermilion only while listening; system CJK sans, greetings 40-64px, translations 22-32px
+   LAYOUT: phone: stacked halves with the far half turned 180°; 900px and up: side by side, upright, fold bar on top */
+:root{color-scheme:light dark;--paper:light-dark(#fbfaf6,#131315);--ink:light-dark(#17171b,#f1f0eb);--mute:light-dark(#68675f,#a5a49d);--line:light-dark(#e0ded5,#2c2c31);--bub:light-dark(#eeede6,#222227);--blue:light-dark(#2443d6,#1a2c8e);--soft:rgba(255,255,255,.15);--fold:light-dark(#17171b,#060607);--rec:#ff4f2e;--focus:#ffb199}
+*{box-sizing:border-box;min-width:0}
+html,body{height:100%}
+body{margin:0;background:var(--fold);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei","Segoe UI",sans-serif;overflow:hidden}
+button,select,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+[hidden]{display:none!important}
+.ic{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.ic .fl{fill:currentColor;stroke:none}
+.app{height:100vh;height:100dvh;display:grid;grid-template-rows:minmax(0,1fr) auto minmax(0,1fr);grid-template-areas:"them" "fold" "me"}
+.side{grid-area:me;display:flex;flex-direction:column;min-height:0;padding:12px max(16px,4vw) 14px;background:var(--paper);color:var(--ink);transition:box-shadow .2s}
+.side.hot{box-shadow:inset 0 0 0 4px var(--rec)}
+.them{grid-area:them;background:var(--blue);color:#fff}
+@media (max-width:899px){.app.rot .them{transform:rotate(180deg)}}
+.hd{display:flex;align-items:center;gap:10px;min-height:44px}
+.who{display:none;font-size:14px;font-weight:700;opacity:.7}
+.lw{position:relative;display:inline-flex;align-items:center}
+.lw .ic{position:absolute;right:12px;width:16px;height:16px;pointer-events:none}
+.lw select{appearance:none;-webkit-appearance:none;height:40px;max-width:62vw;border:0;border-radius:20px;padding:0 36px 0 14px;font-weight:600;background:var(--bub);cursor:pointer}
+.them .lw select{background:var(--soft)}
+.lw option{color:#17171b;background:#fff}
+.st{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;white-space:nowrap;opacity:.85}
+.st.rec::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--rec)}
+.log{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:12px;padding:10px 0}
+.log>:first-child{margin-top:auto}
+.t{transition:opacity .3s}
+.log>.t:not(:nth-last-child(-n+2)){opacity:.5}
+.rx{display:flex;align-items:flex-start;gap:10px}
+.rx p{flex:1;margin:0;font-size:clamp(22px,5.4vw,32px);line-height:1.32;font-weight:600;overflow-wrap:anywhere}
+.tx{align-self:flex-end;max-width:88%;padding:8px 14px;border-radius:18px 18px 4px 18px;background:var(--bub)}
+.them .tx{background:var(--soft)}
+.tx p{margin:0;font-size:17px;color:var(--mute);overflow-wrap:anywhere}
+.them .tx p{color:rgba(255,255,255,.82)}
+.pt{opacity:.55}
+.fail{font-size:17px;font-weight:400;opacity:.75}
+.say{flex:none;width:44px;height:44px;border:0;border-radius:50%;display:grid;place-items:center;background:var(--bub)}
+.them .say{background:var(--soft)}
+.empty{margin:auto 0}
+.hi{margin:0;font-size:clamp(40px,12vw,64px);line-height:1.05;font-weight:700}
+.hint{margin:10px 0 0;font-size:17px;opacity:.78}
+.env{margin:10px 0 0;font-size:14px;color:var(--mute);max-width:62ch}
+.ft{display:flex;align-items:center;gap:10px;padding-top:10px}
+.mic{flex:none;width:60px;height:60px;border:0;border-radius:50%;display:grid;place-items:center;background:var(--ink);color:var(--paper)}
+.them .mic{background:#fff;color:#2443d6}
+.mic .ic{width:28px;height:28px}
+.mic.on{background:var(--rec);color:#fff;animation:pulse 1.3s ease-out infinite}
+@keyframes pulse{from{box-shadow:0 0 0 0 rgba(255,79,46,.55)}to{box-shadow:0 0 0 18px rgba(255,79,46,0)}}
+.in{flex:1;height:48px;border:1px solid var(--line);border-radius:24px;padding:0 18px;font-size:16px;background:var(--bub)}
+.them .in{border-color:transparent;background:var(--soft)}
+.them .in::placeholder{color:rgba(255,255,255,.7)}
+.send{flex:none;width:44px;height:44px;border:0;border-radius:50%;display:grid;place-items:center;background:var(--bub)}
+.them .send{background:var(--soft)}
+.fold{grid-area:fold;display:flex;align-items:center;gap:4px;min-height:56px;padding:6px max(10px,3vw);background:var(--fold);color:#f1f0eb;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.brand{font-weight:700;font-size:15px;margin-right:6px;white-space:nowrap}
+.tg{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;border:0;border-radius:19px;background:rgba(255,255,255,.1);color:#f1f0eb;font-weight:600;white-space:nowrap}
+.tg[aria-pressed=true]{background:#f1f0eb;color:#17171b}
+.tg i{width:9px;height:9px;border-radius:50%;background:currentColor;opacity:.4}
+.tg.run i{background:var(--rec);opacity:1}
+.sp{flex:1}
+.ib{width:44px;height:44px;border:0;border-radius:12px;background:transparent;display:grid;place-items:center}
+.ib:hover{background:rgba(255,255,255,.08)}
+.ib[aria-pressed=false]{opacity:.55}
+@media (max-width:379px){.brand{display:none}}
+@media (min-width:900px){.app{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);grid-template-areas:"fold fold" "me them"}#flip{display:none}.who{display:inline}.side{padding:18px 28px 20px}}
+@media (prefers-reduced-motion:reduce){.mic.on{animation:none}.t,.side{transition:none}}
+.toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9;width:max-content;max-width:min(90vw,440px);padding:10px 16px;border-radius:14px;background:#fff;color:#17171b;box-shadow:0 10px 30px rgba(0,0,0,.28);font-size:15px;pointer-events:none;opacity:0;transition:opacity .2s}
+.toast.show{opacity:1}
+@media (min-width:900px){.toast{top:80px;transform:translateX(-50%)}}
+dialog{width:min(92vw,480px);max-height:86vh;border:0;border-radius:18px;padding:0;background:var(--paper);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.sh{display:grid;gap:10px;padding:20px}
+.sh h2{margin:0;font-size:20px}.sh h3{margin:6px 0 0;font-size:16px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px}
+.row input{width:22px;height:22px;accent-color:#2443d6}
+.row select{height:40px;border:1px solid var(--line);border-radius:12px;padding:0 10px;background:var(--bub);font-size:16px}
+.btns{display:flex;flex-wrap:wrap;gap:10px}
+.btn{height:44px;padding:0 18px;border:1px solid var(--line);border-radius:22px;background:var(--bub);font-weight:600}
+.btn.pri{background:var(--ink);color:var(--paper);border-color:transparent}
+.btn.warn{color:light-dark(#b8341a,#ff8a70)}
+.sh ol{margin:0;padding-left:1.3em;display:grid;gap:6px;font-size:15px}
+.sh textarea{width:100%;min-height:140px;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--bub);font-size:14px}
+.envl{margin:0;font-size:14px;color:var(--mute)}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+ <section class="side them" id="sideB" aria-label="對方">
+  <header class="hd"><span class="who">對方</span><span class="lw"><select id="langB" aria-label="對方的語言"></select><svg class="ic" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span><span class="st" id="stB"></span></header>
+  <div class="log" id="logB"></div>
+  <div class="ft"><button class="mic" id="micB" type="button"></button><input class="in" id="inB" type="text" enterkeyhint="send" autocomplete="off" aria-label="對方的訊息"><button class="send" id="sendB" type="button" aria-label="送出"><svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg></button></div>
+ </section>
+ <nav class="fold" aria-label="工具列">
+  <span class="brand">雙向翻譯</span>
+  <button class="tg" id="auto" type="button" aria-pressed="true"><i></i><span id="autoTx">自動輪流</span></button>
+  <span class="sp"></span>
+  <button class="ib" id="read" type="button" aria-pressed="true" aria-label="翻完自動朗讀"></button>
+  <button class="ib" id="flip" type="button" aria-label="翻轉對方的畫面"><svg class="ic" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 0 1 13-5.1M18 3.5v4h-4M19.5 12a7.5 7.5 0 0 1-13 5.1M6 20.5v-4h4"/></svg></button>
+  <button class="ib" id="more" type="button" aria-label="設定與對話紀錄"><svg class="ic" viewBox="0 0 24 24"><circle class="fl" cx="5" cy="12" r="1.7"/><circle class="fl" cx="12" cy="12" r="1.7"/><circle class="fl" cx="19" cy="12" r="1.7"/></svg></button>
+ </nav>
+ <section class="side me" id="sideA" aria-label="我">
+  <header class="hd"><span class="who">我</span><span class="lw"><select id="langA" aria-label="我的語言"></select><svg class="ic" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span><span class="st" id="stA"></span></header>
+  <div class="log" id="logA"></div>
+  <div class="ft"><button class="mic" id="micA" type="button"></button><input class="in" id="inA" type="text" enterkeyhint="send" autocomplete="off" aria-label="我的訊息"><button class="send" id="sendA" type="button" aria-label="送出"><svg class="ic" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg></button></div>
+ </section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="sheet" aria-label="設定與對話紀錄">
+ <div class="sh">
+  <h2>設定與紀錄</h2>
+  <label class="row"><span>自動輪流（說完自動換對方）</span><input type="checkbox" id="optAuto"></label>
+  <label class="row"><span>停頓多久算說完</span><select id="optGap"><option value="1">1 秒</option><option value="1.5">1.5 秒</option><option value="2">2 秒</option><option value="3">3 秒</option></select></label>
+  <label class="row"><span>邊說邊翻譯（對方即時看到）</span><input type="checkbox" id="optLive"></label>
+  <label class="row"><span>放慢朗讀速度</span><input type="checkbox" id="optSlow"></label>
+  <div class="btns"><button class="btn" id="copy" type="button">複製對話紀錄</button><button class="btn warn" id="clear" type="button">清除對話</button></div>
+  <textarea id="copyBox" readonly hidden aria-label="對話紀錄"></textarea>
+  <h3>怎麼用</h3>
+  <ol>
+   <li>你的畫面在下方（電腦上在左邊），對方的在上方並轉向對方；兩邊各選自己的語言。</li>
+   <li>按任一邊的麥克風開始。開著「自動輪流」時，說完停一下就會翻譯、念出來，接著自動聽另一邊。</li>
+   <li>同一個人想接著說：按他那一邊的麥克風搶回來。要暫停：按紅色的麥克風。</li>
+   <li>關掉「自動輪流」時：按一下開始、說完再按一下。</li>
+   <li>對話只留在這個畫面，關掉就清空；需要記錄請先複製。</li>
+  </ol>
+  <p class="envl" id="envInfo"></p>
+  <button class="btn pri" id="close" type="button">完成</button>
+ </div>
+</dialog>
+<script>
+{
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const svg = d => `<svg class="ic" viewBox="0 0 24 24">${d}</svg>`;
+const IC = {
+  mic: svg('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>'),
+  stop: svg('<rect class="fl" x="7" y="7" width="10" height="10" rx="2"/>'),
+  spk: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>'),
+  mute: svg('<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>'),
+  retry: svg('<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4v4.5H15"/>')
+};
+// key, menu name, speech tag, Google Translate code, greeting, mic hint, placeholder, listening, translating, failed
+const LANGS = [
+  ['zh-TW','繁體中文','zh-TW','zh-TW','你好','按下麥克風開始說話','輸入文字…','聆聽中','翻譯中','翻譯失敗'],
+  ['en','English','en-US','en','Hello','Tap the mic and start speaking','Type a message…','Listening','Translating',"Couldn't translate"],
+  ['ja','日本語','ja-JP','ja','こんにちは','マイクを押して話してください','ここに入力…','聞き取り中','翻訳中','翻訳できませんでした'],
+  ['ko','한국어','ko-KR','ko','안녕하세요','마이크를 누르고 말씀하세요','여기에 입력…','듣는 중','번역 중','번역하지 못했어요'],
+  ['vi','Tiếng Việt','vi-VN','vi','Xin chào','Nhấn micro rồi bắt đầu nói','Nhập tin nhắn…','Đang nghe','Đang dịch','Không dịch được'],
+  ['id','Bahasa Indonesia','id-ID','id','Halo','Tekan mikrofon lalu mulai bicara','Ketik pesan…','Mendengarkan','Menerjemahkan','Gagal menerjemahkan'],
+  ['th','ภาษาไทย','th-TH','th','สวัสดี','แตะไมโครโฟนแล้วเริ่มพูด','พิมพ์ข้อความ…','กำลังฟัง','กำลังแปล','แปลไม่สำเร็จ'],
+  ['tl','Filipino','fil-PH','tl','Kumusta','Pindutin ang mikropono at magsalita','Mag-type dito…','Nakikinig','Isinasalin','Hindi naisalin'],
+  ['ms','Bahasa Melayu','ms-MY','ms','Helo','Tekan mikrofon dan mula bercakap','Taip mesej…','Mendengar','Menterjemah','Gagal diterjemah'],
+  ['zh-CN','简体中文','zh-CN','zh-CN','你好','按下麦克风开始说话','输入文字…','聆听中','翻译中','翻译失败'],
+  ['es','Español','es-ES','es','Hola','Toca el micrófono y empieza a hablar','Escribe aquí…','Escuchando','Traduciendo','No se pudo traducir'],
+  ['fr','Français','fr-FR','fr','Bonjour','Touchez le micro et parlez','Écrivez ici…','J’écoute','Traduction','Traduction impossible'],
+  ['de','Deutsch','de-DE','de','Hallo','Mikrofon antippen und sprechen','Hier tippen…','Hört zu','Übersetzt','Übersetzung fehlgeschlagen']
+];
+const LANG = {};
+for (const [key, name, bcp, gt, hi, hint, ph, listen, tr, fail] of LANGS) LANG[key] = {key, name, bcp, gt, hi, hint, ph, listen, tr, fail};
+
+const P = {A: 'zh-TW', B: 'en', auto: true, gap: 1.5, live: true, read: true, slow: false, rot: null};
+try { Object.assign(P, JSON.parse(localStorage.getItem('xlate-gas') || '{}')); } catch (e) {}
+if (!LANG[P.A]) P.A = 'zh-TW';
+if (!LANG[P.B]) P.B = 'en';
+if (![1, 1.5, 2, 3].includes(+P.gap)) P.gap = 1.5;
+P.gap = +P.gap;
+if (P.rot === null) P.rot = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+const save = () => { try { localStorage.setItem('xlate-gas', JSON.stringify(P)); } catch (e) {} };
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const isAndroid = /Android/i.test(navigator.userAgent);
+// translation runs in the owner's Apps Script (LanguageApp); the key comes once from the link's #k=… and stays in this browser
+const API = 'https://script.google.com/macros/s/AKfycbzqx1xc83tlDvt5R-dC83txGMPUjTZU4j2nRaXPxLq2G8fW7zxhSZxJRwHwuhlaIOfd/exec';
+let KEY = '';
+try {
+  const m = location.hash.match(/k=([A-Za-z0-9_-]+)/);
+  if (m) { KEY = m[1]; localStorage.setItem('xlate-key', KEY); history.replaceState(null, '', location.pathname + location.search); }
+  else KEY = localStorage.getItem('xlate-key') || '';
+} catch (e) {}
+const hasAPI = !!KEY;
+const hasVoice = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+
+let turns = [], seq = 0, speakingId = null, unlocked = false, clearArm = false, toastT, wake = null;
+let cur = null;                 // the turn being heard: {side, turn, base}
+let rec = null, recTok = 0, want = false, sessRes = false, sessAt = 0, quick = [], autoStart = false;
+let endT = null, running = false, flow = 0;
+const noStt = {};
+const other = s => (s === 'A' ? 'B' : 'A');
+const spaced = lk => !/^(zh|ja|th)/.test(lk);
+
+function joinText(a, b, lk) {
+  a = a || '';
+  b = String(b || '').trim();
+  if (!b) return a;
+  if (!a) return b;
+  return spaced(lk) ? a + ' ' + b : a + b;
+}
+function unesc(s) { const d = document.createElement('textarea'); d.innerHTML = String(s || ''); return d.value; }
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => t.classList.remove('show'), 4200);
+}
+
+function envNote() {
+  if (!hasAPI) return '這個網址少了金鑰：請用我給你的完整連結（後面有 #k=…）開一次，之後就不用了。';
+  if (!SR) return '這個瀏覽器無法直接收音：Android 請用 Chrome、iPhone 請用 Safari 開啟；也可以點輸入框，用鍵盤麥克風。';
+  return P.auto ? '按任一邊的麥克風開始。說完停一下就會翻譯、念出來，接著自動換對方說；按紅色麥克風暫停。'
+    : '按麥克風開始說話，說完再按一次；對方用另一半畫面的麥克風回話。';
+}
+
+function turnHtml(t, side) {
+  if (t.side === side) {
+    const body = esc(t.src) + (t.partial ? `<span class="pt">${t.src && spaced(t.from) ? ' ' : ''}${esc(t.partial)}</span>` : '');
+    return `<div class="t tx"><p>${body || '<span class="pt">…</span>'}</p></div>`;
+  }
+  if (!t.src && !t.partial) return '';
+  let txt = t.tr ? esc(t.tr) : !t.err ? '<span class="pt">…</span>' : '';
+  let btn = '';
+  if (t.err && !t.busy) {
+    txt += `${txt ? ' ' : ''}<span class="fail">${esc(LANG[t.to].fail)}</span>`;
+    btn = `<button class="say" type="button" data-act="retry" data-id="${t.id}" aria-label="重新翻譯">${IC.retry}</button>`;
+  } else if (t.tr && !t.busy && hasVoice) {
+    const on = speakingId === t.id;
+    btn = `<button class="say" type="button" data-act="say" data-id="${t.id}" aria-label="${on ? '停止朗讀' : '念出來'}">${on ? IC.stop : IC.spk}</button>`;
+  }
+  return `<div class="t rx${t.err ? ' err' : ''}"><p>${txt}</p>${btn}</div>`;
+}
+
+function renderSide(side) {
+  const L = LANG[P[side]], log = $('log' + side), mine = !!(cur && cur.side === side);
+  const sec = $('side' + side);
+  sec.lang = L.key;
+  sec.classList.toggle('hot', mine);
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  const html = turns.map(t => turnHtml(t, side)).join('');
+  log.innerHTML = html || `<div class="empty"><p class="hi">${esc(L.hi)}</p><p class="hint">${esc(SR && !noStt[L.key] ? L.hint : L.ph.replace('…', ''))}</p>${side === 'A' ? `<p class="env">${esc(envNote())}</p>` : ''}</div>`;
+  if (stick) log.scrollTop = log.scrollHeight;
+  const st = $('st' + side), busy = turns.some(t => t.side !== side && t.busy);
+  st.textContent = mine ? L.listen + '…' : busy ? L.tr + '…' : '';
+  st.classList.toggle('rec', mine);
+  const mic = $('mic' + side);
+  mic.hidden = !SR || !!noStt[L.key];
+  mic.classList.toggle('on', mine);
+  mic.innerHTML = mine ? IC.stop : IC.mic;
+  mic.setAttribute('aria-label', mine ? '暫停收音' : side === 'A' ? '我要說話' : '對方說話');
+  $('in' + side).placeholder = L.ph;
+}
+
+function render() {
+  renderSide('A');
+  renderSide('B');
+  const rb = $('read');
+  rb.hidden = !hasVoice;
+  rb.setAttribute('aria-pressed', String(P.read));
+  rb.innerHTML = P.read ? IC.spk : IC.mute;
+  const ab = $('auto');
+  ab.hidden = !SR;
+  ab.setAttribute('aria-pressed', String(P.auto));
+  ab.classList.toggle('run', running);
+  $('autoTx').textContent = running ? '自動輪流中' : '自動輪流';
+  $('flip').setAttribute('aria-pressed', String(!!P.rot));
+  $('app').classList.toggle('rot', !!P.rot);
+}
+
+function addTurn(side, src) {
+  const t = {id: ++seq, side, from: P[side], to: P[other(side)], src, partial: '', tr: '', trFor: null, busy: false, err: null, done: false, ts: new Date(), job: null};
+  turns.push(t);
+  if (turns.length > 60) turns = turns.slice(-60);
+  return t;
+}
+const drop = t => { turns = turns.filter(x => x !== t); };
+const lastDone = () => { for (let i = turns.length - 1; i >= 0; i--) if (turns[i].done) return turns[i]; return null; };
+
+// ---------- translation (owner's Apps Script → LanguageApp) ----------
+async function apiTranslate(text, from, to) {
+  const u = API + '?k=' + encodeURIComponent(KEY) + '&from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) + '&q=' + encodeURIComponent(text.slice(0, 1500));
+  const r = await fetch(u);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  return j.t || '';
+}
+function trErr(e) {
+  const m = String((e && e.message) || e || '');
+  if (m === 'key') return '金鑰不對：請用完整連結（後面有 #k=）重新開一次';
+  if (/too many times|invoked|quota/i.test(m)) return '今天的翻譯次數到上限了，明天會自動恢復';
+  if (/fetch|network|HTTP/i.test(m)) return '連不上翻譯服務，請檢查網路後按重試';
+  return '翻譯暫時失敗，可按重試';
+}
+function translate(t) {
+  const src = t.src.trim();
+  if (!src) return Promise.resolve();
+  if (!hasAPI) { t.err = 'off'; toast('這個網址少了金鑰：請用完整連結（後面有 #k=）開一次'); render(); return Promise.resolve(); }
+  if (t.busy) return t.job;
+  if (t.trFor === src && !t.err) return Promise.resolve();
+  t.busy = true;
+  t.err = null;
+  render();
+  t.job = apiTranslate(src, LANG[t.from].gt, LANG[t.to].gt)
+    .then(r => { t.tr = unesc(r); t.trFor = src; })
+    .catch(e => { t.err = 'fail'; toast(trErr(e)); })
+    .then(() => {
+      t.busy = false;
+      render();
+      if (!t.err && t.src.trim() !== t.trFor && (t.done || P.live)) return translate(t);
+    });
+  return t.job;
+}
+
+// ---------- speaking (phone's own voices) ----------
+function pickVoice(bcp) {
+  let vs = [];
+  try { vs = speechSynthesis.getVoices(); } catch (e) {}
+  const n = s => String(s || '').toLowerCase().replace('_', '-');
+  const want = n(bcp), base = want.split('-')[0];
+  let v = vs.find(x => n(x.lang) === want);
+  if (!v && base === 'zh') v = vs.find(x => /^zh-(tw|hant)/.test(n(x.lang))) || vs.find(x => /^(zh-(cn|hans)|cmn)/.test(n(x.lang)));
+  if (!v && base === 'fil') v = vs.find(x => /^(fil|tl)/.test(n(x.lang)));
+  if (!v && base !== 'zh') v = vs.find(x => n(x.lang).split('-')[0] === base);
+  return v || null;
+}
+function devSpeak(text, bcp, rate) {
+  return new Promise(res => {
+    let done = false, seen = false, iv = null;
+    const t0 = Date.now();
+    const fin = () => { if (!done) { done = true; clearInterval(iv); res(); } };
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = bcp;
+      u.rate = rate;
+      const v = pickVoice(bcp);
+      if (v) u.voice = v;
+      u.onend = u.onerror = fin;
+      speechSynthesis.speak(u);
+      iv = setInterval(() => {
+        const sp = speechSynthesis.speaking;
+        if (sp) seen = true;
+        const ms = Date.now() - t0;
+        if ((seen && !sp) || (!seen && ms > 2500) || ms > 90000) fin();
+      }, 250);
+    } catch (e) { fin(); }
+  });
+}
+async function speakTurn(t) {
+  if (!t || !t.tr || !hasVoice) return;
+  stopSpeak();
+  speakingId = t.id;
+  render();
+  try { await devSpeak(t.tr, LANG[t.to].bcp, P.slow ? 0.85 : 1); }
+  finally { if (speakingId === t.id) { speakingId = null; render(); } }
+}
+function stopSpeak() {
+  if (hasVoice) { try { speechSynthesis.cancel(); } catch (e) {} }
+  if (speakingId) { speakingId = null; render(); }
+}
+function unlock() {
+  if (unlocked || !hasVoice) return;
+  unlocked = true;
+  try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (e) {}
+}
+async function keepAwake() {
+  try {
+    if (navigator.wakeLock && !wake && document.visibilityState === 'visible') {
+      wake = await navigator.wakeLock.request('screen');
+      wake.addEventListener('release', () => { wake = null; });
+    }
+  } catch (e) {}
+}
+
+// ---------- a finished turn: translate, read aloud, then (in auto mode) listen to the other side ----------
+async function finishTurn(t, next, silent) {
+  const f = flow;
+  if (!t.src.trim()) {
+    drop(t);
+    render();
+    if (next && running && f === flow) startListen(next, true);
+    return;
+  }
+  t.done = true;
+  if (t.err) t.err = null;
+  render();
+  await translate(t);
+  if (f !== flow) return;
+  if (!silent && !t.err && P.read && t === lastDone()) await speakTurn(t);
+  if (f !== flow) return;
+  if (next && running) setTimeout(() => { if (f === flow && running && !cur) startListen(next, true); }, 250);
+}
+
+// ---------- listening (the browser's own speech recognition) ----------
+function startListen(side, auto) {
+  if (!SR) { $('in' + side).focus(); return; }
+  const lk = P[side];
+  if (noStt[lk]) { running = false; toast(`${LANG[lk].name}無法用語音辨識，請改用打字`); render(); return; }
+  stopSpeak();
+  closeRec();
+  cur = {side, turn: addTurn(side, ''), base: ''};
+  want = true;
+  quick = [];
+  autoStart = !!auto;
+  openRec();
+  render();
+}
+function openRec() {
+  if (!cur) return;
+  const tok = ++recTok, r = new SR();
+  r.lang = LANG[P[cur.side]].bcp;
+  r.continuous = !isAndroid;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+  r.onresult = e => { if (tok === recTok) onResult(e); };
+  r.onerror = e => { if (tok === recTok) onRecError(e.error); };
+  r.onend = () => { if (tok === recTok) onRecEnd(); };
+  rec = r;
+  sessRes = false;
+  sessAt = Date.now();
+  try { r.start(); }
+  catch (e) { setTimeout(() => { if (tok === recTok) { onRecError('start-failed'); onRecEnd(); } }, 0); }
+}
+function closeRec() {
+  recTok++;
+  const r = rec;
+  rec = null;
+  if (r) { try { r.abort(); } catch (e) {} }
+}
+function onResult(e) {
+  if (!cur) return;
+  sessRes = true;
+  quick = [];
+  autoStart = false;
+  const t = cur.turn, lk = t.from;
+  let fin = '', mid = '';
+  for (let i = 0; i < e.results.length; i++) {
+    const r = e.results[i], s = r[0] ? r[0].transcript : '';
+    if (r.isFinal) fin = joinText(fin, s, lk); else mid = joinText(mid, s, lk);
+  }
+  const before = t.src;
+  t.src = joinText(cur.base, fin, lk);
+  t.partial = mid;
+  render();
+  if (P.live && t.src !== before) translate(t);
+  if (running && P.auto) armEnd(!mid);
+}
+function armEnd(settled) {
+  clearTimeout(endT);
+  endT = setTimeout(autoEnd, P.gap * 1000 + (settled ? 0 : 1200));
+}
+function autoEnd() {
+  if (!cur || !running || !P.auto) return;
+  const c = cur, t = c.turn;
+  if (!(t.src + t.partial).trim()) return;
+  if (t.partial) { t.src = joinText(t.src, t.partial, t.from); t.partial = ''; }
+  cur = null;
+  want = false;
+  closeRec();
+  render();
+  finishTurn(t, other(c.side));
+}
+function onRecEnd() {
+  rec = null;
+  if (!cur) return;
+  const t = cur.turn;
+  if (t.partial) { t.src = joinText(t.src, t.partial, t.from); t.partial = ''; }
+  cur.base = t.src;
+  if (want) {
+    // a session that ends almost at once without hearing anything, again and again, means the mic is not really working
+    quick = !sessRes && Date.now() - sessAt < 800 ? quick.concat(1) : [];
+    if (quick.length > 5) { haltListening('收音一直中斷，請再按一次麥克風'); return; }
+    setTimeout(() => { if (want && cur && !rec) openRec(); }, 150);
+    return;
+  }
+  const c = cur;
+  cur = null;
+  clearTimeout(endT);
+  render();
+  finishTurn(c.turn, null);
+}
+function onRecError(err) {
+  if (err === 'no-speech' || err === 'aborted') return;
+  const lk = cur ? cur.turn.from : null;
+  if (err === 'not-allowed' && autoStart) { haltListening('換對方說：請按一下他那邊的麥克風'); return; }
+  if (err === 'not-allowed' || err === 'service-not-allowed') haltListening('沒有麥克風權限：請點網址列旁的圖示，允許使用麥克風');
+  else if (err === 'audio-capture') haltListening('找不到麥克風，或麥克風正被其他 App 使用');
+  else if (err === 'network') haltListening('語音辨識需要網路，請檢查連線後再按麥克風');
+  else if (err === 'language-not-supported') { if (lk) noStt[lk] = true; haltListening(`${lk ? LANG[lk].name : '這個語言'}無法用語音辨識，請改用打字`); }
+  else haltListening('收音出了點問題，請再按一次麥克風');
+}
+function haltListening(msg, silent) {
+  running = false;
+  want = false;
+  clearTimeout(endT);
+  const c = cur;
+  cur = null;
+  closeRec();
+  if (c) finishTurn(c.turn, null, silent);
+  if (msg) toast(msg);
+  render();
+}
+
+function micClick(side) {
+  unlock();
+  keepAwake();
+  flow++;
+  if (!SR) { $('in' + side).focus(); return; }
+  if (cur && cur.side === side) {          // tap the red mic: pause
+    running = false;
+    clearTimeout(endT);
+    want = false;
+    if (rec) { try { rec.stop(); } catch (e) { onRecEnd(); } }
+    else { const c = cur; cur = null; finishTurn(c.turn, null); }
+    render();
+    return;
+  }
+  if (cur) {                                // the other side is listening: hand the turn over now
+    clearTimeout(endT);
+    const t = cur.turn;
+    if (t.partial) { t.src = joinText(t.src, t.partial, t.from); t.partial = ''; }
+    cur = null;
+    want = false;
+    closeRec();
+    finishTurn(t, null, true);
+  }
+  running = P.auto;
+  startListen(side, false);
+}
+
+function sendText(side) {
+  const inp = $('in' + side), v = inp.value.trim();
+  if (!v) { inp.focus(); return; }
+  unlock();
+  stopSpeak();
+  inp.value = '';
+  inp.blur();
+  const t = addTurn(side, v);
+  if (cur && turns.indexOf(cur.turn) > -1) { turns = turns.filter(x => x !== t); turns.splice(turns.indexOf(cur.turn), 0, t); }
+  finishTurn(t, null, !!cur);
+  render();
+}
+
+function transcript() {
+  const pad = n => String(n).padStart(2, '0');
+  const rows = turns.filter(t => t.src.trim()).map(t => `${pad(t.ts.getHours())}:${pad(t.ts.getMinutes())} ${t.side === 'A' ? '我' : '對方'}（${LANG[t.from].name}）：${t.src.trim()}\n      → ${LANG[t.to].name}：${t.tr || '（未翻譯）'}`);
+  if (!rows.length) return '';
+  const d = new Date();
+  return `雙向翻譯紀錄 ${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}\n` + rows.join('\n');
+}
+
+for (const s of ['A', 'B']) {
+  const sel = $('lang' + s);
+  sel.innerHTML = LANGS.map(l => `<option value="${l[0]}">${esc(l[1])}</option>`).join('');
+  sel.value = P[s];
+  sel.addEventListener('change', () => {
+    P[s] = sel.value;
+    save();
+    if (cur && cur.side === s) { flow++; haltListening('', true); }
+    render();
+  });
+  $('mic' + s).addEventListener('click', () => micClick(s));
+  $('send' + s).addEventListener('click', () => sendText(s));
+  $('in' + s).addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendText(s); }
+  });
+  $('log' + s).addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const t = turns.find(x => x.id === +b.dataset.id);
+    if (!t) return;
+    unlock();
+    if (b.dataset.act === 'retry') {
+      t.err = null;
+      translate(t).then(() => { if (!t.err && P.read && !cur) speakTurn(t); });
+    } else if (speakingId === t.id) stopSpeak();
+    else if (!cur) speakTurn(t);
+    else toast('收音中不能朗讀，先按紅色麥克風暫停');
+  });
+}
+
+function setAuto(on) {
+  P.auto = !!on;
+  save();
+  if (!P.auto) { running = false; clearTimeout(endT); }
+  else if (cur) running = true;
+  render();
+}
+$('auto').addEventListener('click', () => {
+  setAuto(!P.auto);
+  toast(P.auto ? '自動輪流：說完停一下就翻譯，再換對方說' : '已關閉自動輪流：按一下開始、說完再按一下');
+});
+$('read').addEventListener('click', () => {
+  P.read = !P.read;
+  save();
+  if (!P.read) stopSpeak();
+  render();
+  toast(P.read ? '翻譯完會自動念出來' : '已關閉自動朗讀，可點喇叭重聽');
+});
+$('flip').addEventListener('click', () => { P.rot = !P.rot; save(); render(); });
+$('more').addEventListener('click', () => {
+  $('optAuto').checked = P.auto;
+  $('optGap').value = String(P.gap);
+  $('optLive').checked = P.live;
+  $('optSlow').checked = P.slow;
+  $('envInfo').textContent = `目前環境　收音：${SR ? '瀏覽器語音辨識' : '不支援（請改用 Chrome／Safari）'}｜翻譯：${hasAPI ? 'Google 翻譯（你的 Apps Script）' : '缺少金鑰'}｜朗讀：${hasVoice ? '手機內建語音' : '無'}`;
+  $('copyBox').hidden = true;
+  clearArm = false;
+  $('clear').textContent = '清除對話';
+  const d = $('sheet');
+  try { d.showModal(); } catch (e) { d.setAttribute('open', ''); }
+});
+$('close').addEventListener('click', () => { const d = $('sheet'); try { d.close(); } catch (e) { d.removeAttribute('open'); } });
+$('optAuto').addEventListener('change', e => setAuto(e.target.checked));
+$('optGap').addEventListener('change', e => { P.gap = +e.target.value || 1.5; save(); });
+$('optLive').addEventListener('change', e => { P.live = e.target.checked; save(); });
+$('optSlow').addEventListener('change', e => { P.slow = e.target.checked; save(); });
+$('copy').addEventListener('click', () => {
+  const txt = transcript(), btn = $('copy'), box = $('copyBox');
+  if (!txt) { btn.textContent = '還沒有對話'; setTimeout(() => { btn.textContent = '複製對話紀錄'; }, 1800); return; }
+  const show = () => { box.value = txt; box.hidden = false; box.focus(); box.select(); btn.textContent = '請手動複製下方文字'; };
+  try {
+    navigator.clipboard.writeText(txt).then(() => { btn.textContent = '已複製'; setTimeout(() => { btn.textContent = '複製對話紀錄'; }, 1800); }, show);
+  } catch (e) { show(); }
+});
+$('clear').addEventListener('click', () => {
+  if (!clearArm) { clearArm = true; $('clear').textContent = '再按一次確認清除'; return; }
+  clearArm = false;
+  flow++;
+  running = false;
+  want = false;
+  clearTimeout(endT);
+  cur = null;
+  closeRec();
+  stopSpeak();
+  turns = [];
+  $('clear').textContent = '清除對話';
+  $('close').click();
+  render();
+  toast('對話已清除');
+});
+document.addEventListener('pointerdown', unlock, true);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (cur || running) { flow++; haltListening('', true); }
+    stopSpeak();
+  } else if (wake === null && running) keepAwake();
+});
+
+render();
+}
+</script>
+</body>
+</html>
